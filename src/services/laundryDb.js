@@ -60,6 +60,75 @@ function assertRole(allowedRoles) {
   }
 }
 
+/** Idle cutoff for "online". Max wall-clock lifetime is SESSION_TTL_MS. */
+export const SESSION_IDLE_MS = 5 * 60 * 1000
+export const SESSION_TTL_MS = 8 * 60 * 60 * 1000
+
+function ensureSessions(state) {
+  if (!Array.isArray(state.sessions)) {
+    state.sessions = []
+    return true
+  }
+  return false
+}
+
+function computeSessionStatus(session, now = Date.now()) {
+  if (!session) return 'offline'
+  if (session.endedAt) {
+    return session.endReason === 'expired' ? 'expired' : 'offline'
+  }
+  const last = new Date(session.lastActivityAt || session.startedAt).getTime()
+  const exp = new Date(session.expiresAt || 0).getTime()
+  if (!Number.isFinite(last) || now - last > SESSION_IDLE_MS) return 'expired'
+  if (Number.isFinite(exp) && now > exp) return 'expired'
+  return 'online'
+}
+
+function expireStaleSessions(state, now = Date.now()) {
+  let changed = false
+  for (const session of state.sessions || []) {
+    if (session.endedAt) continue
+    if (computeSessionStatus(session, now) !== 'expired') continue
+    session.endedAt = new Date(now).toISOString()
+    session.endReason = 'expired'
+    changed = true
+  }
+  return changed
+}
+
+function beginAuthSession(state, acc) {
+  ensureSessions(state)
+  expireStaleSessions(state)
+  const now = Date.now()
+  for (const session of state.sessions) {
+    if (session.accountId === acc.id && !session.endedAt) {
+      session.endedAt = new Date(now).toISOString()
+      session.endReason = 'replaced'
+    }
+  }
+  const row = {
+    id: newId('sess'),
+    accountId: acc.id,
+    role: acc.role,
+    storeId: acc.storeId || null,
+    startedAt: new Date(now).toISOString(),
+    lastActivityAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
+    endedAt: null,
+    endReason: null,
+  }
+  state.sessions.unshift(row)
+  state.sessions = state.sessions.slice(0, 500)
+  log(state, 'info', 'Account signed in', {
+    accountId: acc.id,
+    role: acc.role,
+    sessionId: row.id,
+    storeId: row.storeId,
+  })
+  persist(state)
+  return row
+}
+
 function generateOfficialReceiptNumber(state, date = new Date()) {
   const stamp = date.toISOString().slice(0, 10).replace(/-/g, '')
   const prefix = `OR-${stamp}-`
@@ -353,6 +422,7 @@ function createSeed() {
       { id: 'exp_2', storeId: STORE_MAIN_ID, description: 'Supplies restock', amount: 900, date: todayISODate() },
       { id: 'exp_d1', storeId: STORE_DAVAO_ID, description: 'Rent (April)', amount: 15000, date: todayISODate() },
     ],
+    sessions: [],
     systemLogs: [
       {
         id: 'log_seed',
@@ -568,6 +638,7 @@ function ensureState() {
       payments: Array.isArray(raw.payments) ? raw.payments : [],
       orders: Array.isArray(raw.orders) ? raw.orders : [],
       accounts: Array.isArray(raw.accounts) ? raw.accounts : [],
+      sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
     }
     let changed = migrateToV4(normalized)
     if (normalizeOfficialReceipts(normalized)) changed = true
@@ -585,6 +656,7 @@ function ensureState() {
     if (Array.isArray(raw.systemLogs)) seed.systemLogs = raw.systemLogs
     if (Array.isArray(raw.messages)) seed.messages = raw.messages
     if (Array.isArray(raw.stores) && raw.stores.length) seed.stores = raw.stores
+    if (Array.isArray(raw.sessions)) seed.sessions = raw.sessions
     if (raw.meta) seed.meta = { ...seed.meta, ...raw.meta }
     migrateToV4(seed)
   }
@@ -858,6 +930,7 @@ export function accountToSession(acc) {
     preferredDetergentId: acc.preferredDetergentId,
     preferredScentId: acc.preferredScentId,
     preferredStoreId: acc.preferredStoreId || null,
+    sessionId: null,
   }
 }
 
@@ -887,7 +960,8 @@ export function authenticate(identity, password) {
     }
   }
 
-  return accountToSession(acc)
+  const authSession = beginAuthSession(state, acc)
+  return { ...accountToSession(acc), sessionId: authSession.id }
 }
 
 export function registerCustomer(payload) {
@@ -1049,7 +1123,10 @@ function syncSessionFromAccount(acc) {
     if (!raw) return
     const session = JSON.parse(raw)
     if (session?.id !== acc.id) return
-    localStorage.setItem('loggedInUser', JSON.stringify(accountToSession(acc)))
+    localStorage.setItem(
+      'loggedInUser',
+      JSON.stringify({ ...accountToSession(acc), sessionId: session.sessionId || null }),
+    )
   } catch {
     /* ignore */
   }
@@ -1443,7 +1520,449 @@ function monthShortLabel(monthKey) {
   return d.toLocaleString('en-US', { month: 'short' })
 }
 
-export function getReports() {
+export function touchAuthSession(sessionId) {
+  if (!sessionId) return false
+  const state = getState()
+  ensureSessions(state)
+  const expired = expireStaleSessions(state)
+  const session = state.sessions.find((s) => s.id === sessionId)
+  if (!session || session.endedAt) {
+    if (expired) persist(state)
+    return false
+  }
+  const now = Date.now()
+  session.lastActivityAt = new Date(now).toISOString()
+  session.expiresAt = new Date(now + SESSION_TTL_MS).toISOString()
+  persist(state)
+  return true
+}
+
+export function endAuthSession(sessionId, reason = 'logout') {
+  if (!sessionId) return false
+  const state = getState()
+  ensureSessions(state)
+  const session = state.sessions.find((s) => s.id === sessionId)
+  if (!session || session.endedAt) return false
+  session.endedAt = new Date().toISOString()
+  session.endReason = reason
+  log(state, 'info', 'Account session ended', {
+    sessionId,
+    accountId: session.accountId,
+    reason,
+  })
+  persist(state)
+  return true
+}
+
+function authorizedStoreIdsForCurrentUser() {
+  const session = getCurrentSession()
+  const role = session?.role
+  if (role === 'super_admin') return listStores().map((s) => s.id)
+  if ((role === 'admin' || role === 'staff') && session.storeId) return [session.storeId]
+  return []
+}
+
+export function listAuthorizedStores() {
+  const ids = new Set(authorizedStoreIdsForCurrentUser())
+  return listStores().filter((s) => ids.has(s.id))
+}
+
+function assertStoreAccess(storeId) {
+  const role = getCurrentRole()
+  if (role === 'super_admin') return
+  const allowed = authorizedStoreIdsForCurrentUser()
+  if (!storeId || !allowed.includes(storeId)) {
+    throw new Error('You are not authorized to access this branch.')
+  }
+}
+
+function localDateKey(value = new Date()) {
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function resolveReportRange(filters = {}) {
+  const period = filters.period || 'monthly'
+  const baseKey = filters.baseDate || todayISODate()
+  const base = new Date(`${baseKey}T12:00:00`)
+  if (period === 'custom') {
+    const from = filters.from || baseKey
+    const to = filters.to || baseKey
+    return { period, from, to, label: `${from} to ${to}` }
+  }
+  if (period === 'daily') {
+    return { period, from: baseKey, to: baseKey, label: `Daily · ${baseKey}` }
+  }
+  if (period === 'weekly') {
+    const start = new Date(base)
+    start.setDate(start.getDate() - start.getDay())
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    const from = localDateKey(start)
+    const to = localDateKey(end)
+    return { period, from, to, label: `Weekly · ${from} to ${to}` }
+  }
+  const from = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-01`
+  const last = new Date(base.getFullYear(), base.getMonth() + 1, 0)
+  const to = localDateKey(last)
+  return { period: 'monthly', from, to, label: `Monthly · ${from.slice(0, 7)}` }
+}
+
+function inReportRange(isoOrDate, from, to) {
+  const day = String(isoOrDate || '').slice(0, 10)
+  if (!day) return false
+  if (from && day < from) return false
+  if (to && day > to) return false
+  return true
+}
+
+function paymentMethodLabel(method) {
+  if (method === 'cash') return 'Cash'
+  if (method === 'digital') return 'Digital (GCash / Maya / card)'
+  return method || 'Unspecified'
+}
+
+function accountVisibleToAdmin(acc, allowedStoreIds) {
+  if (!acc) return false
+  if (acc.role === 'super_admin') return getCurrentRole() === 'super_admin'
+  if (acc.storeId && allowedStoreIds.includes(acc.storeId)) return true
+  return false
+}
+
+export function getAccountActivity(filters = {}) {
+  assertRole(['admin', 'super_admin'])
+  const state = getState()
+  ensureSessions(state)
+  if (expireStaleSessions(state)) persist(state)
+
+  const allowedStoreIds = authorizedStoreIdsForCurrentUser()
+  if (filters.storeId) {
+    assertStoreAccess(filters.storeId)
+  }
+  const storeFilter = filters.storeId || ''
+  const roleFilter = filters.role || 'all'
+  const statusFilter = filters.status || 'all'
+  const q = String(filters.search || '').trim().toLowerCase()
+
+  const latestByAccount = new Map()
+  for (const session of state.sessions) {
+    if (!latestByAccount.has(session.accountId)) latestByAccount.set(session.accountId, session)
+  }
+
+  const accounts = state.accounts.filter((acc) => accountVisibleToAdmin(acc, allowedStoreIds))
+  const rows = accounts.map((acc) => {
+    const session = latestByAccount.get(acc.id) || null
+    const status = session ? computeSessionStatus(session) : 'offline'
+    const store = acc.storeId ? getStore(acc.storeId) : null
+    return {
+      accountId: acc.id,
+      name: acc.name || acc.username,
+      username: acc.username,
+      email: acc.email || '',
+      role: acc.role,
+      storeId: acc.storeId || null,
+      storeName: store?.name || (acc.role === 'super_admin' ? 'Platform' : 'Unassigned'),
+      status,
+      sessionId: session && status === 'online' ? session.id : null,
+      lastLoginAt: session?.startedAt || null,
+      lastActivityAt: session?.lastActivityAt || null,
+      endedAt: session?.endedAt || null,
+      endReason: session?.endReason || null,
+    }
+  })
+
+  return rows.filter((row) => {
+    if (storeFilter && row.storeId !== storeFilter) return false
+    if (roleFilter !== 'all' && row.role !== roleFilter) return false
+    if (statusFilter === 'online' && row.status !== 'online') return false
+    if (statusFilter === 'offline' && row.status !== 'offline') return false
+    if (statusFilter === 'expired' && row.status !== 'expired') return false
+    if (!q) return true
+    const hay = `${row.name} ${row.username} ${row.email} ${row.storeName}`.toLowerCase()
+    return hay.includes(q)
+  })
+}
+
+export function getActiveSessions() {
+  assertRole(['admin', 'super_admin'])
+  const state = getState()
+  ensureSessions(state)
+  if (expireStaleSessions(state)) persist(state)
+  const allowedStoreIds = authorizedStoreIdsForCurrentUser()
+  const now = Date.now()
+  return state.sessions
+    .filter((session) => computeSessionStatus(session, now) === 'online')
+    .filter((session) => {
+      if (getCurrentRole() === 'super_admin') return true
+      return session.storeId && allowedStoreIds.includes(session.storeId)
+    })
+    .map((session) => {
+      const acc = state.accounts.find((a) => a.id === session.accountId)
+      const store = session.storeId ? getStore(session.storeId) : null
+      return {
+        id: session.id,
+        accountId: session.accountId,
+        name: acc?.name || acc?.username || 'Unknown',
+        username: acc?.username || '',
+        role: session.role,
+        storeName: store?.name || (session.role === 'super_admin' ? 'Platform' : 'Unassigned'),
+        startedAt: session.startedAt,
+        lastActivityAt: session.lastActivityAt,
+        expiresAt: session.expiresAt,
+      }
+    })
+}
+
+export function getLoginHistory(limit = 25) {
+  assertRole(['admin', 'super_admin'])
+  const state = getState()
+  ensureSessions(state)
+  const allowedStoreIds = authorizedStoreIdsForCurrentUser()
+  return state.sessions
+    .filter((session) => {
+      if (getCurrentRole() === 'super_admin') return true
+      return session.storeId && allowedStoreIds.includes(session.storeId)
+    })
+    .slice(0, limit)
+    .map((session) => {
+      const acc = state.accounts.find((a) => a.id === session.accountId)
+      const store = session.storeId ? getStore(session.storeId) : null
+      return {
+        id: session.id,
+        name: acc?.name || acc?.username || 'Unknown',
+        role: session.role,
+        storeName: store?.name || (session.role === 'super_admin' ? 'Platform' : 'Unassigned'),
+        startedAt: session.startedAt,
+        lastActivityAt: session.lastActivityAt,
+        endedAt: session.endedAt,
+        endReason: session.endReason,
+        status: computeSessionStatus(session),
+      }
+    })
+}
+
+export function terminateAuthSession(sessionId) {
+  assertRole(['admin', 'super_admin'])
+  const state = getState()
+  ensureSessions(state)
+  const session = state.sessions.find((s) => s.id === sessionId)
+  if (!session) throw new Error('Session not found.')
+  if (getCurrentRole() !== 'super_admin') {
+    assertStoreAccess(session.storeId)
+  }
+  if (session.endedAt) return session
+  session.endedAt = new Date().toISOString()
+  session.endReason = 'admin_terminated'
+  log(state, 'warn', 'Administrator terminated a session', {
+    sessionId,
+    accountId: session.accountId,
+  })
+  persist(state)
+  return session
+}
+
+function scopedFinancialRows(filters = {}) {
+  assertRole(['admin', 'super_admin'])
+  const allowed = authorizedStoreIdsForCurrentUser()
+  const requested = filters.storeId || ''
+  if (requested) assertStoreAccess(requested)
+  const storeIds = requested ? [requested] : allowed
+  const range = resolveReportRange(filters)
+  const state = getState()
+
+  const orders = state.orders.filter((o) => storeIds.includes(o.storeId) && inReportRange(o.createdAt, range.from, range.to))
+  const payments = state.payments.filter(
+    (p) => storeIds.includes(p.storeId) && inReportRange(p.createdAt, range.from, range.to),
+  )
+  const expenses = state.expenses.filter((e) => storeIds.includes(e.storeId) && inReportRange(e.date, range.from, range.to))
+  const unassigned = {
+    orders: state.orders.filter((o) => !o.storeId).length,
+    payments: state.payments.filter((p) => !p.storeId).length,
+    expenses: state.expenses.filter((e) => !e.storeId).length,
+  }
+  return { state, storeIds, range, orders, payments, expenses, unassigned, requested }
+}
+
+export function getBranchReport(filters = {}) {
+  const scoped = scopedFinancialRows(filters)
+  const { state, storeIds, range, orders, payments, expenses, unassigned, requested } = scoped
+  const cancelled = orders.filter((o) => o.status === 'cancelled')
+  const countedOrders = orders.filter((o) => o.status !== 'cancelled')
+
+  const orderRevenue = countedOrders.reduce((s, o) => s + (Number(o.total) || 0), 0)
+  const paymentsReceived = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+  const expensesTotal = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+
+  const paidByOrder = {}
+  for (const p of state.payments.filter((row) => storeIds.includes(row.storeId))) {
+    paidByOrder[p.orderId] = (paidByOrder[p.orderId] || 0) + (Number(p.amount) || 0)
+  }
+  const outstandingOrders = state.orders.filter(
+    (o) => storeIds.includes(o.storeId) && o.status !== 'cancelled',
+  )
+  const outstanding = outstandingOrders.reduce((s, o) => {
+    const paid = paidByOrder[o.id] || 0
+    return s + Math.max(0, (Number(o.total) || 0) - paid)
+  }, 0)
+
+  const byStatus = ORDER_STATUSES.reduce((acc, st) => {
+    acc[st] = countedOrders.filter((o) => o.status === st).length
+    return acc
+  }, {})
+  const inProgress = countedOrders.filter((o) => o.status !== 'completed').length
+
+  const serviceCounts = { wash: 0, dry: 0, fold: 0, iron: 0 }
+  for (const o of countedOrders) {
+    for (const k of Object.keys(serviceCounts)) {
+      if (o.services?.[k]) serviceCounts[k] += 1
+    }
+  }
+
+  const paymentMethods = {}
+  for (const p of payments) {
+    const key = p.method || 'unspecified'
+    if (!paymentMethods[key]) paymentMethods[key] = { method: key, label: paymentMethodLabel(key), amount: 0, count: 0 }
+    paymentMethods[key].amount += Number(p.amount) || 0
+    paymentMethods[key].count += 1
+  }
+
+  const stores = listStores().filter((s) => storeIds.includes(s.id))
+  const branchName = requested
+    ? getStore(requested)?.name || 'Unknown branch'
+    : stores.length === 1
+      ? stores[0].name
+      : 'All Laundry Shops'
+
+  const branchBreakdown = stores.map((store) => {
+    const storeOrders = countedOrders.filter((o) => o.storeId === store.id)
+    const storePayments = payments.filter((p) => p.storeId === store.id)
+    const storeExpenses = expenses.filter((e) => e.storeId === store.id)
+    const sales = storePayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+    const exp = storeExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+    const revenue = storeOrders.reduce((s, o) => s + (Number(o.total) || 0), 0)
+    return {
+      storeId: store.id,
+      name: store.name,
+      orders: storeOrders.length,
+      completed: storeOrders.filter((o) => o.status === 'completed').length,
+      orderRevenue: Math.round(revenue * 100) / 100,
+      paymentsReceived: Math.round(sales * 100) / 100,
+      expenses: Math.round(exp * 100) / 100,
+      netIncome: Math.round((sales - exp) * 100) / 100,
+    }
+  })
+
+  const chartMonthKeys = lastNMonthKeys(6)
+  const paymentsByMonth = {}
+  const revenueByMonth = {}
+  for (const p of state.payments.filter((row) => storeIds.includes(row.storeId))) {
+    const mk = (p.createdAt || '').slice(0, 7)
+    if (mk) paymentsByMonth[mk] = (paymentsByMonth[mk] || 0) + (Number(p.amount) || 0)
+  }
+  for (const o of state.orders.filter((row) => storeIds.includes(row.storeId) && row.status !== 'cancelled')) {
+    const mk = (o.createdAt || '').slice(0, 7)
+    if (mk) revenueByMonth[mk] = (revenueByMonth[mk] || 0) + (Number(o.total) || 0)
+  }
+
+  const customerSpend = {}
+  const customerOrders = {}
+  for (const o of countedOrders) {
+    customerSpend[o.customerId] = (customerSpend[o.customerId] || 0) + (Number(o.total) || 0)
+    customerOrders[o.customerId] = (customerOrders[o.customerId] || 0) + 1
+  }
+  const customerAnalytics = state.accounts
+    .filter((a) => a.role === 'customer' && storeIds.includes(a.storeId))
+    .map((c) => ({
+      accountId: c.id,
+      name: c.name,
+      orders: customerOrders[c.id] || 0,
+      spendPhp: Math.round((customerSpend[c.id] || 0) * 100) / 100,
+    }))
+
+  const today = todayISODate()
+  const todayPayments = state.payments.filter(
+    (p) => storeIds.includes(p.storeId) && (p.createdAt || '').slice(0, 10) === today,
+  )
+  const monthKey = today.slice(0, 7)
+  const monthPayments = state.payments.filter(
+    (p) => storeIds.includes(p.storeId) && (p.createdAt || '').slice(0, 7) === monthKey,
+  )
+  const monthExpenses = state.expenses.filter(
+    (e) => storeIds.includes(e.storeId) && String(e.date || '').slice(0, 7) === monthKey,
+  )
+
+  return {
+    branchName,
+    storeIds,
+    range,
+    unassigned,
+    orderRevenue: Math.round(orderRevenue * 100) / 100,
+    paymentsReceived: Math.round(paymentsReceived * 100) / 100,
+    outstanding: Math.round(outstanding * 100) / 100,
+    expensesTotal: Math.round(expensesTotal * 100) / 100,
+    netIncome: Math.round((paymentsReceived - expensesTotal) * 100) / 100,
+    ordersReceived: countedOrders.length,
+    completedOrders: countedOrders.filter((o) => o.status === 'completed').length,
+    inProgressOrders: inProgress,
+    cancelledOrders: cancelled.length,
+    pendingOrders: countedOrders.filter((o) => o.status === 'received' || o.status === 'processing').length,
+    byStatus,
+    popularServices: Object.keys(serviceCounts).map((id) => ({
+      id,
+      label: SERVICE_LABELS[id] || id,
+      count: serviceCounts[id],
+    })),
+    paymentMethods: Object.values(paymentMethods).map((row) => ({
+      ...row,
+      amount: Math.round(row.amount * 100) / 100,
+    })),
+    branchBreakdown,
+    orders,
+    payments,
+    expenses,
+    customerAnalytics,
+    dashboardCharts: {
+      months: chartMonthKeys.map((key) => ({ key, shortLabel: monthShortLabel(key) })),
+      incomePhp: chartMonthKeys.map((k) => Math.round((paymentsByMonth[k] || 0) * 100) / 100),
+      salesPhp: chartMonthKeys.map((k) => Math.round((revenueByMonth[k] || 0) * 100) / 100),
+      popularServices: Object.keys(serviceCounts)
+        .map((id) => ({ id, label: SERVICE_LABELS[id] || id, count: serviceCounts[id] }))
+        .sort((a, b) => b.count - a.count),
+    },
+    dailySalesSummary: {
+      date: today,
+      orderCount: state.orders.filter(
+        (o) => storeIds.includes(o.storeId) && (o.createdAt || '').slice(0, 10) === today,
+      ).length,
+      recordedPaymentsPhp: Math.round(todayPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100,
+    },
+    monthlyRevenue: {
+      month: monthKey,
+      recordedPaymentsPhp: Math.round(monthPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100,
+    },
+    monthlyExpenses: Math.round(monthExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0) * 100) / 100,
+    orderVolume: {
+      total: countedOrders.length,
+      byStatus,
+    },
+    servicePopularity: serviceCounts,
+  }
+}
+
+export function getReports(filters = {}) {
+  const role = getCurrentRole()
+  if (role === 'admin' || role === 'super_admin') {
+    const report = getBranchReport({ period: filters.period || 'monthly', ...filters })
+    return {
+      ...report,
+      expensesTotal: report.expensesTotal,
+    }
+  }
+
   const state = getTenantState()
   const orders = state.orders
   const payments = state.payments.filter((p) => p.status === 'paid' || p.status === 'partial')
@@ -1543,44 +2062,21 @@ export function getReports() {
 }
 
 export function getSalesReport(filters = {}) {
-  const state = getTenantState()
-  const period = filters.period || 'daily'
-  const baseDate = filters.baseDate ? new Date(filters.baseDate) : new Date()
+  const report = getBranchReport(filters)
   const method = filters.method || 'all'
-  const from = filters.from ? new Date(filters.from) : null
-  const to = filters.to ? new Date(filters.to) : null
-
-  function inPeriod(date) {
-    const d = new Date(date)
-    if (Number.isNaN(d.getTime())) return false
-    if (from && d < from) return false
-    if (to && d > to) return false
-    if (period === 'daily') return d.toISOString().slice(0, 10) === baseDate.toISOString().slice(0, 10)
-    if (period === 'weekly') {
-      const start = new Date(baseDate)
-      start.setDate(baseDate.getDate() - baseDate.getDay())
-      start.setHours(0, 0, 0, 0)
-      const end = new Date(start)
-      end.setDate(start.getDate() + 7)
-      return d >= start && d < end
-    }
-    if (period === 'monthly') {
-      return d.getFullYear() === baseDate.getFullYear() && d.getMonth() === baseDate.getMonth()
-    }
-    return true
-  }
-
-  const payments = state.payments
-    .filter((p) => (method === 'all' ? true : p.method === method))
-    .filter((p) => inPeriod(p.createdAt))
+  const payments =
+    method === 'all' ? report.payments : report.payments.filter((p) => p.method === method)
+  const state = getState()
 
   const paymentRows = payments.map((p) => {
     const order = state.orders.find((o) => o.id === p.orderId)
     const customer = order ? state.accounts.find((a) => a.id === order.customerId) : null
+    const store = p.storeId ? getStore(p.storeId) : null
     return {
       ...p,
       orderCode: order?.code || 'Unknown',
       customerName: customer?.name || 'Unknown',
+      shopName: store?.name || 'Unassigned',
       date: p.createdAt?.slice(0, 10) || '',
     }
   })
@@ -1593,6 +2089,8 @@ export function getSalesReport(filters = {}) {
   }, {})
 
   return {
+    branchName: report.branchName,
+    range: report.range,
     paymentRows,
     summary: {
       totalSales: Math.round(totalSales * 100) / 100,
