@@ -18,6 +18,15 @@
       </router-link>
 
       <router-link
+        to="/customer/new-order"
+        active-class="bg-white/20"
+        class="w-full flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium hover:bg-white/10 transition"
+      >
+        <div>➕</div>
+        <div>New order</div>
+      </router-link>
+
+      <router-link
         to="/customer/my-orders"
         active-class="bg-white/20"
         class="w-full flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium hover:bg-white/10 transition"

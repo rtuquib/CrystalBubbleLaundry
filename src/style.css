@@ -4,3 +4,170 @@
 body {
   font-family: 'Poppins', sans-serif;
 }
+
+/* Comprehensive button fixes - ensure ALL buttons are clickable */
+button {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Fix all clickable elements */
+[role="button"] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Ensure router-link buttons are clickable */
+a[class*="rounded-"] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+}
+
+/* Fix any element with click handler */
+[onclick] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Ensure all interactive elements work */
+input[type="button"],
+input[type="submit"],
+.btn,
+button,
+[role="button"],
+[aria-label*="button"],
+[title*="button"] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Fix any potential overlay issues */
+.main-content {
+  position: relative;
+  z-index: 10;
+}
+
+/* Ensure dropdown and menu items work */
+.dropdown-item,
+.menu-item,
+[role="menuitem"] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Fix filter and action buttons */
+.filter-btn,
+.action-btn,
+.tab-btn {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Aggressive modal and dialog fixes */
+[role="dialog"],
+[aria-modal="true"],
+.fixed {
+  pointer-events: auto !important;
+}
+
+/* All buttons in modals and dialogs */
+[role="dialog"] button,
+[aria-modal="true"] button,
+.fixed button,
+.z-\[9999\] button,
+.z-\[90\] button {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  position: relative !important;
+  z-index: 10000 !important;
+}
+
+/* Teleport content fixes */
+teleport * {
+  pointer-events: auto !important;
+}
+
+/* Ensure all interactive elements work */
+* {
+  pointer-events: revert !important;
+}
+
+/* Then re-enable only buttons */
+button,
+[role="button"],
+input[type="button"],
+input[type="submit"],
+.btn {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Force all interactive elements to work */
+* {
+  pointer-events: revert !important;
+}
+
+/* Re-enable all clickable elements */
+button,
+[onclick],
+[role="button"],
+[role="menuitem"],
+[role="option"],
+a,
+input[type="button"],
+input[type="submit"],
+input[type="checkbox"],
+input[type="radio"],
+select,
+textarea,
+.btn,
+.action-btn,
+.filter-btn,
+.tab-btn,
+.dropdown-item,
+.menu-item {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Global fix for Vue event handling */
+.vue-component * {
+  pointer-events: auto !important;
+}
+
+/* Ensure all elements with click handlers work */
+[onclick] {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Universal button fix */
+* {
+  pointer-events: revert !important;
+}
+
+/* Re-enable all interactive elements */
+button,
+[role="button"],
+input[type="button"],
+input[type="submit"],
+input[type="checkbox"],
+input[type="radio"],
+select,
+textarea,
+a,
+.btn,
+.action-btn,
+.filter-btn,
+.tab-btn,
+.dropdown-item,
+.menu-item {
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}

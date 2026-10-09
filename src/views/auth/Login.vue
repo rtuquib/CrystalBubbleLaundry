@@ -1,89 +1,122 @@
 <template>
-  <div class="h-screen overflow-hidden bg-sky-500 flex items-center justify-center px-4">
-    <div class="relative w-full max-w-[350px]">
-      <div class="absolute left-1/2 -top-10 -translate-x-1/2 z-20 w-20 h-20 rounded-full bg-[#f2f2f2] shadow-lg flex items-center justify-center">
-        <img
-          src="../../assets/logo.svg"
-          alt="CrystalBubble Logo"
-          class="w-16 h-16 object-contain"
-        />
+  <div class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-gradient-to-br from-sky-200 via-blue-100 to-cyan-100">
+    <div class="absolute inset-0 opacity-50 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.85),transparent_35%),radial-gradient(circle_at_80%_30%,rgba(59,130,246,0.12),transparent_35%),radial-gradient(circle_at_70%_85%,rgba(56,189,248,0.16),transparent_35%)]" />
+    <div class="absolute inset-0 bg-blue-500/20" />
+
+    <section class="relative z-10 w-full max-w-[430px] rounded-2xl border border-white/60 bg-white px-6 py-7 shadow-[0_24px_48px_-12px_rgba(37,99,235,0.35)] sm:px-7">
+      <div class="flex justify-center mb-3">
+        <div class="h-14 w-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-md">
+          <img src="../../assets/logo.svg" alt="CrystalBubble Logo" class="h-8 w-8" />
+        </div>
       </div>
 
-      <div class="bg-[#f8f8f8] rounded-[32px] shadow-2xl pt-16 pb-8 px-7">
-        <h1 class="text-center text-3xl font-semibold text-gray-400 mb-6">
-          Crystal Bubble Laundry
-        </h1>
+      <h1 class="text-center text-4xl font-semibold tracking-tight text-blue-700">Sign in</h1>
+      <p class="mt-2 text-center text-sm text-slate-500">Welcome back! Please login to your account</p>
 
-        <form @submit.prevent="handleLogin" class="space-y-4">
-          <div class="relative">
-            <input
-              v-model="username"
-              type="text"
-              placeholder="Username..."
-              class="w-full rounded-full bg-[#ececec] py-3 px-4 text-sm text-gray-500 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-400"
-            />
-          </div>
+      <form @submit.prevent="handleLogin" class="mt-5 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">Username or Email</label>
+          <input
+            v-model.trim="identity"
+            type="text"
+            placeholder="Username or Email"
+            class="w-full rounded-full border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            required
+          />
+        </div>
 
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">Password</label>
           <div class="relative">
             <input
               v-model="password"
-              type="password"
-              placeholder="Password..."
-              class="w-full rounded-full bg-[#ececec] py-3 px-4 text-sm text-gray-500 placeholder-gray-400 outline-none focus:ring-2 focus:ring-sky-400"
+              :type="showPassword ? 'text' : 'password'"
+              placeholder="Password"
+              class="w-full rounded-full border border-slate-300 bg-white px-4 py-3 pr-16 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              required
             />
+            <button
+              type="button"
+              @click="showPassword = !showPassword"
+              class="absolute inset-y-0 right-0 px-4 text-xs font-semibold text-blue-600 hover:text-blue-700"
+            >
+              {{ showPassword ? 'Hide' : 'Show' }}
+            </button>
           </div>
+        </div>
 
-          <button
-            type="submit"
-            class="w-full rounded-full bg-sky-500 py-3 text-white text-xl font-medium shadow-md transition hover:bg-sky-600"
-          >
-            Log in
-          </button>
+        <div class="flex items-center justify-between text-sm">
+          <label class="inline-flex items-center gap-2 text-slate-700 cursor-pointer select-none">
+            <input v-model="rememberMe" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-300" />
+            <span>Remember me</span>
+          </label>
+          <button type="button" class="font-semibold text-blue-600 hover:text-blue-700">Forgot password?</button>
+        </div>
 
-          <p v-if="errorMessage" class="text-center text-sm text-red-500">
-            {{ errorMessage }}
-          </p>
+        <p v-if="errorMessage" class="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {{ errorMessage }}
+        </p>
 
-          <p class="text-center text-sm text-gray-300">
-            Forgot your password?
-          </p>
-        </form>
-      </div>
-    </div>
+        <button
+          type="submit"
+          class="w-full rounded-md bg-gradient-to-r from-blue-600 to-blue-700 py-3 text-white text-lg font-semibold shadow-md transition hover:from-blue-700 hover:to-blue-800"
+        >
+          Login
+        </button>
+
+        <div class="pt-1">
+          <div class="h-px w-full bg-slate-200" />
+        </div>
+        <p class="text-center text-sm text-slate-500">
+          Dont have an account?
+          <router-link to="/register" class="font-semibold text-blue-600 hover:text-blue-700">Register now</router-link>
+        </p>
+      </form>
+    </section>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { users } from '../../data/users'
+import { useRoute } from 'vue-router'
+import { authenticate, ensureDemoCredentials } from '../../services/laundryDb.js'
+import { homePathForRole, roleAllowedForPath } from '../../router/guards.js'
 
-const router = useRouter()
+const route = useRoute()
 
-const username = ref('')
+const identity = ref('')
 const password = ref('')
+const showPassword = ref(false)
+const rememberMe = ref(true)
 const errorMessage = ref('')
 
-const handleLogin = () => {
-  const foundUser = users.find(
-    (user) =>
-      user.username === username.value &&
-      user.password === password.value
-  )
+function goToRoleHome(session) {
+  localStorage.setItem('loggedInUser', JSON.stringify(session))
 
-  if (!foundUser) {
-    errorMessage.value = 'Invalid username or password'
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  const home = homePathForRole(session.role)
+  const target =
+    redirect.startsWith('/') && !redirect.startsWith('//') && roleAllowedForPath(session.role, redirect)
+      ? redirect
+      : home
+
+  window.location.assign(target)
+}
+
+function handleLogin() {
+  errorMessage.value = ''
+  ensureDemoCredentials()
+  let session
+  try {
+    session = authenticate(identity.value, password.value)
+  } catch (e) {
+    errorMessage.value = e.message || 'Unable to sign in.'
     return
   }
-
-  localStorage.setItem('loggedInUser', JSON.stringify(foundUser))
-
-  if (foundUser.role === 'customer') {
-    router.push('/customer/dashboard')
-  } else if (foundUser.role === 'staff') {
-    router.push('/staff/dashboard')
-  } else if (foundUser.role === 'admin') {
-    router.push('/admin/dashboard')
+  if (!session) {
+    errorMessage.value = 'Invalid username/email or password.'
+    return
   }
+  goToRoleHome(session)
 }
 </script>

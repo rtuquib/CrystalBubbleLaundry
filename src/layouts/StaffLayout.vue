@@ -1,15 +1,33 @@
 <template>
-  <div class="h-screen w-screen overflow-hidden flex bg-slate-100">
-    <!-- Sidebar -->
-    <StaffSidebar />
+  <div class="min-h-screen bg-slate-100">
+    <div
+      v-if="isSidebarOpen"
+      class="fixed inset-0 z-40 bg-slate-900/50 lg:hidden"
+      @click="isSidebarOpen = false"
+    />
 
-    <!-- Right Side -->
-    <div class="flex-1 flex flex-col bg-slate-50">
-      <!-- Header -->
-      <AppHeader :userName="loggedInUser.name" />
+    <div
+      class="fixed inset-y-0 left-0 z-50 w-72 transform transition-transform duration-200 lg:translate-x-0"
+      :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+    >
+      <RoleSidebar
+        :panelLabel="ui.panelLabel"
+        :navItems="navItems"
+        @close="isSidebarOpen = false"
+      />
+    </div>
 
-      <!-- Main Content -->
-      <main class="flex-1 overflow-y-auto p-6">
+    <div class="min-h-screen lg:pl-72 flex flex-col">
+      <RoleTopHeader
+        :userName="loggedInUser.name"
+        :roleLabel="ui.roleLabel"
+        :storeName="loggedInUser.storeName || ''"
+        profilePath="/staff/profile"
+        :notificationCount="notificationCount"
+        @toggle-sidebar="isSidebarOpen = !isSidebarOpen"
+      />
+
+      <main class="flex-1 p-4 sm:p-6 lg:p-8 main-content relative z-10">
         <router-view />
       </main>
     </div>
@@ -17,18 +35,47 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import StaffSidebar from '../components/StaffSidebar.vue'
-import AppHeader from '../components/AppHeader.vue'
+import { computed, ref, onMounted, watch } from 'vue'
+import RoleSidebar from '../components/RoleSidebar.vue'
+import RoleTopHeader from '../components/RoleTopHeader.vue'
+import { ROLE_UI } from '../constants/roleUi.js'
+import { useLaundryDb } from '../composables/useLaundryDb.js'
+import { getAccountById, accountToSession, getTenantState, getUnreadMessageCount } from '../services/laundryDb.js'
 
-const loggedInUser = ref({
-  name: 'Staff User',
+const { tick } = useLaundryDb()
+const ui = ROLE_UI.staff
+const loggedInUser = ref({ name: 'Staff User' })
+const isSidebarOpen = ref(false)
+
+const navItems = computed(() => {
+  tick.value
+  return ui.navItems.map((item) =>
+    item.to === '/staff/messaging'
+      ? {
+          ...item,
+          badge: loggedInUser.value.id ? getUnreadMessageCount(loggedInUser.value.id) : 0,
+        }
+      : item,
+  )
 })
 
-onMounted(() => {
+const notificationCount = computed(() => {
+  tick.value
+  const state = getTenantState()
+  const queueCount = state.orders.filter((order) => order.status !== 'completed').length
+  const readyForRelease = state.orders.filter((order) => order.status === 'ready_for_pickup').length
+  const unreadMessages = loggedInUser.value.id ? getUnreadMessageCount(loggedInUser.value.id) : 0
+  return queueCount + readyForRelease + unreadMessages
+})
+
+function loadUser() {
   const storedUser = localStorage.getItem('loggedInUser')
-  if (storedUser) {
-    loggedInUser.value = JSON.parse(storedUser)
-  }
-})
+  if (!storedUser) return
+  const parsed = JSON.parse(storedUser)
+  const acc = getAccountById(parsed.id)
+  loggedInUser.value = acc ? accountToSession(acc) : parsed
+}
+
+onMounted(loadUser)
+watch(tick, loadUser)
 </script>
