@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import {
   clearSession,
+  getSession,
   getSessionRole,
   homePathForRole,
   roleAllowedForPath,
@@ -52,6 +53,8 @@ import StaffOfficialReceipt from '../views/staff/OfficialReceipt.vue'
 import SuperAdminDashboard from '../views/super-admin/Dashboard.vue'
 import SuperAdminStores from '../views/super-admin/Stores.vue'
 import SuperAdminStoreShow from '../views/super-admin/StoreShow.vue'
+import SuperAdminAccounts from '../views/super-admin/Accounts.vue'
+import ForcePasswordChange from '../views/auth/ForcePasswordChange.vue'
 
 const routes = [
   {
@@ -89,6 +92,11 @@ const routes = [
     name: 'register',
     component: Register,
     meta: { public: true },
+  },
+  {
+    path: '/account/change-password',
+    name: 'force-password-change',
+    component: ForcePasswordChange,
   },
 
   {
@@ -162,6 +170,7 @@ const routes = [
       { path: 'dashboard', name: 'super-admin-dashboard', component: SuperAdminDashboard },
       { path: 'stores', name: 'super-admin-stores', component: SuperAdminStores },
       { path: 'stores/:storeId', name: 'super-admin-store-show', component: SuperAdminStoreShow },
+      { path: 'accounts', name: 'super-admin-accounts', component: SuperAdminAccounts },
     ],
   },
 
@@ -196,6 +205,14 @@ router.beforeEach((to) => {
   if (!role) {
     clearSession()
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  const mustChange = Boolean(getSession()?.mustChangePassword)
+  if (mustChange && to.name !== 'force-password-change') {
+    return { name: 'force-password-change' }
+  }
+  if (!mustChange && to.name === 'force-password-change') {
+    return homePathForRole(role)
   }
 
   const allowedRoles = to.matched

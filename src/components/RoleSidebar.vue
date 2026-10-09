@@ -2,7 +2,7 @@
   <aside class="h-full w-72 bg-gradient-to-b from-blue-900 via-blue-800 to-blue-900 text-blue-50 flex flex-col shadow-2xl">
     <div class="h-20 px-6 border-b border-white/15 flex items-center justify-between">
       <div>
-        <p class="text-lg font-semibold leading-tight">CrystalBubble</p>
+        <p class="text-lg font-semibold leading-tight">{{ brandTitle }}</p>
         <p class="text-xs text-blue-200">{{ panelLabel }}</p>
       </div>
       <button
@@ -42,6 +42,10 @@
 
 <script setup>
 defineProps({
+  brandTitle: {
+    type: String,
+    default: 'CrystalBubble',
+  },
   panelLabel: {
     type: String,
     default: 'Workspace',

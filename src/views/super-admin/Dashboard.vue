@@ -1,17 +1,25 @@
 <template>
   <div class="space-y-6 lg:space-y-8">
     <section class="rounded-3xl border border-slate-200 bg-gradient-to-r from-slate-800 to-slate-900 p-6 sm:p-8 text-white shadow-lg">
-      <p class="text-sm text-slate-300">SaaS platform overview</p>
-      <h2 class="text-2xl sm:text-3xl font-semibold mt-1">Super Admin Dashboard</h2>
+      <p class="text-sm text-slate-300">System Overview</p>
+      <h2 class="text-2xl sm:text-3xl font-semibold mt-1">Laundry Business Management</h2>
       <p class="mt-3 text-sm text-slate-300 max-w-3xl">
-        Monitor every CrystalBubble store. Each store runs its own admin, staff, and customer system with isolated data.
+        Administer the Laundry Management System: onboard independent laundry shops, review platform activity, and manage registered accounts. Each shop keeps its own business identity, including CrystalBubble and other registered stores.
       </p>
-      <router-link
-        to="/super-admin/stores"
-        class="mt-5 inline-flex rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100"
-      >
-        Manage stores
-      </router-link>
+      <div class="mt-5 flex flex-wrap gap-3">
+        <router-link
+          to="/super-admin/stores"
+          class="inline-flex rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100"
+        >
+          Manage laundry shops
+        </router-link>
+        <router-link
+          to="/super-admin/accounts"
+          class="inline-flex rounded-lg border border-white/30 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+        >
+          Account management
+        </router-link>
+      </div>
     </section>
 
     <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
@@ -28,7 +36,7 @@
 
     <section class="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
       <div class="flex items-center justify-between gap-3 mb-4">
-        <h3 class="text-lg font-semibold text-slate-900">Stores</h3>
+        <h3 class="text-lg font-semibold text-slate-900">Registered laundry shops</h3>
         <router-link to="/super-admin/stores" class="text-sm font-semibold text-blue-600 hover:text-blue-700">
           View all
         </router-link>
@@ -100,10 +108,10 @@ const storeRows = computed(() => {
 const statCards = computed(() => {
   const s = summary.value
   return [
-    { label: 'Stores', value: s.stores, note: `${s.active} active · ${s.suspended} suspended` },
-    { label: 'Store admins', value: s.admins, note: 'Across all stores' },
-    { label: 'Staff', value: s.staff, note: 'Across all stores' },
-    { label: 'Platform sales', value: `₱${Number(s.sales).toLocaleString()}`, note: `${s.orders} total orders` },
+    { label: 'Laundry shops', value: s.stores, note: `${s.active} active · ${s.suspended} suspended` },
+    { label: 'Shop administrators', value: s.admins, note: 'Across registered businesses' },
+    { label: 'Staff', value: s.staff, note: 'Across registered businesses' },
+    { label: 'Recorded payments', value: `₱${Number(s.sales).toLocaleString()}`, note: `${s.orders} total orders` },
   ]
 })
 </script>

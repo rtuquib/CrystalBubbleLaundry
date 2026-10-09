@@ -771,7 +771,7 @@ export function getStoreMetrics(storeId) {
     customers: accounts.filter((a) => a.role === 'customer').length,
     orders: orders.length,
     sales: Math.round(sales * 100) / 100,
-    accounts,
+    accounts: accounts.map((a) => toPublicAccount(a)),
     orderRows: orders,
     paymentRows: payments,
   }
@@ -931,6 +931,8 @@ export function accountToSession(acc) {
     preferredScentId: acc.preferredScentId,
     preferredStoreId: acc.preferredStoreId || null,
     sessionId: null,
+    status: acc.status === 'disabled' ? 'disabled' : 'active',
+    mustChangePassword: !!acc.mustChangePassword,
   }
 }
 
@@ -951,6 +953,10 @@ export function authenticate(identity, password) {
     return a.password === pass && (username === key || email === key)
   })
   if (!acc) return null
+
+  if (acc.status === 'disabled') {
+    throw new Error('This account is deactivated. Contact the platform administrator.')
+  }
 
   if (acc.role !== 'super_admin' && acc.storeId) {
     const store = state.stores.find((s) => s.id === acc.storeId)
@@ -1114,6 +1120,349 @@ export function deleteAccount(accountId) {
   state.messages = state.messages.filter((m) => m.fromId !== accountId && m.toId !== accountId)
   log(state, 'warn', 'Account deleted', { accountId, role: account.role })
   persist(state)
+}
+
+export const PLATFORM_ROLE_LABELS = {
+  super_admin: 'Super Admin',
+  admin: 'Laundry Shop Administrator',
+  staff: 'Staff',
+  customer: 'Customer',
+}
+
+function accountStatusOf(acc) {
+  return acc?.status === 'disabled' ? 'disabled' : 'active'
+}
+
+function latestLoginAt(accountId) {
+  const state = getState()
+  const session = (state.sessions || []).find((s) => s.accountId === accountId)
+  return session?.startedAt || null
+}
+
+export function toPublicAccount(acc) {
+  if (!acc) return null
+  const store = acc.storeId ? getStore(acc.storeId) : null
+  return {
+    id: acc.id,
+    name: acc.name,
+    username: acc.username,
+    email: acc.email || '',
+    phone: acc.phone || '',
+    address: acc.address || '',
+    role: acc.role,
+    roleLabel: PLATFORM_ROLE_LABELS[acc.role] || acc.role,
+    storeId: acc.storeId || null,
+    storeName: store?.name || (acc.role === 'super_admin' ? 'Platform' : 'Unassigned'),
+    status: accountStatusOf(acc),
+    createdAt: acc.createdAt,
+    lastLoginAt: latestLoginAt(acc.id),
+    mustChangePassword: !!acc.mustChangePassword,
+  }
+}
+
+function actorMeta() {
+  const session = getCurrentSession()
+  return { actorId: session?.id || null, actorRole: session?.role || null }
+}
+
+function countActiveSuperAdmins(state, exceptId = null) {
+  return state.accounts.filter(
+    (a) => a.role === 'super_admin' && accountStatusOf(a) === 'active' && a.id !== exceptId,
+  ).length
+}
+
+function revokeAccountSessions(state, accountId, reason) {
+  ensureSessions(state)
+  const now = new Date().toISOString()
+  for (const session of state.sessions) {
+    if (session.accountId === accountId && !session.endedAt) {
+      session.endedAt = now
+      session.endReason = reason
+    }
+  }
+}
+
+function assertUniqueIdentity(state, { username, email, exceptId }) {
+  const user = String(username || '').trim().toLowerCase()
+  if (user && state.accounts.some((a) => a.id !== exceptId && String(a.username || '').toLowerCase() === user)) {
+    throw new Error('Username already taken')
+  }
+  const mail = String(email || '').trim().toLowerCase()
+  if (mail && state.accounts.some((a) => a.id !== exceptId && String(a.email || '').toLowerCase() === mail)) {
+    throw new Error('Email address already in use')
+  }
+}
+
+function assertValidStoreAssignment(role, storeId) {
+  if (role === 'super_admin') return null
+  if (!storeId) throw new Error('A laundry shop is required for this role.')
+  const store = getStore(storeId)
+  if (!store) throw new Error('Selected laundry shop was not found.')
+  return store.id
+}
+
+export function listPlatformAccounts(filters = {}) {
+  assertRole(['super_admin'])
+  const state = getState()
+  const role = filters.role || 'all'
+  const storeId = filters.storeId || 'all'
+  const status = filters.status || 'all'
+  const q = String(filters.search || '').trim().toLowerCase()
+  return state.accounts
+    .map((acc) => toPublicAccount(acc))
+    .filter((row) => {
+      if (role !== 'all' && row.role !== role) return false
+      if (storeId === 'unassigned' && row.storeId) return false
+      if (storeId !== 'all' && storeId !== 'unassigned' && row.storeId !== storeId) return false
+      if (status !== 'all' && row.status !== status) return false
+      if (!q) return true
+      const hay = `${row.name} ${row.username} ${row.email} ${row.storeName} ${row.roleLabel}`.toLowerCase()
+      return hay.includes(q)
+    })
+}
+
+export function getPlatformAccount(accountId) {
+  assertRole(['super_admin'])
+  const acc = getAccountById(accountId)
+  if (!acc) throw new Error('Account not found')
+  return toPublicAccount(acc)
+}
+
+export function superAdminCreateAccount(payload) {
+  assertRole(['super_admin'])
+  const state = getState()
+  const role = payload.role
+  if (!['super_admin', 'admin', 'staff', 'customer'].includes(role)) {
+    throw new Error('Invalid account role.')
+  }
+  const username = String(payload.username || '').trim().toLowerCase()
+  const password = String(payload.password || '')
+  if (!username || password.length < 6) {
+    throw new Error('Username and a password of at least 6 characters are required.')
+  }
+  const email = String(payload.email || '').trim()
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Enter a valid email address.')
+  }
+  assertUniqueIdentity(state, { username, email, exceptId: null })
+  const storeId = assertValidStoreAssignment(role, payload.storeId)
+  const account = {
+    id: newId('acc'),
+    username,
+    password,
+    role,
+    storeId,
+    name: String(payload.name || '').trim() || username,
+    email,
+    phone: String(payload.phone || '').trim(),
+    address: String(payload.address || '').trim(),
+    preferredDetergentId: null,
+    preferredScentId: null,
+    preferredStoreId: null,
+    status: 'active',
+    mustChangePassword: true,
+    createdAt: new Date().toISOString(),
+  }
+  state.accounts.push(account)
+  log(state, 'info', 'Account created', {
+    ...actorMeta(),
+    accountId: account.id,
+    role: account.role,
+    storeId: account.storeId,
+  })
+  persist(state)
+  return toPublicAccount(account)
+}
+
+export function superAdminUpdateAccount(accountId, patch) {
+  assertRole(['super_admin'])
+  const state = getState()
+  const account = state.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error('Account not found')
+  const before = {
+    name: account.name,
+    username: account.username,
+    email: account.email,
+    role: account.role,
+    storeId: account.storeId,
+    status: accountStatusOf(account),
+  }
+
+  const nextUsername = patch.username !== undefined ? String(patch.username || '').trim().toLowerCase() : account.username
+  const nextEmail = patch.email !== undefined ? String(patch.email || '').trim() : account.email
+  if (patch.email !== undefined && nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+    throw new Error('Enter a valid email address.')
+  }
+  assertUniqueIdentity(state, { username: nextUsername, email: nextEmail, exceptId: account.id })
+
+  const nextRole = patch.role !== undefined ? patch.role : account.role
+  if (!['super_admin', 'admin', 'staff', 'customer'].includes(nextRole)) {
+    throw new Error('Invalid account role.')
+  }
+  if (account.role === 'super_admin' && nextRole !== 'super_admin' && countActiveSuperAdmins(state, account.id) < 1) {
+    throw new Error('Cannot change the role of the last active Super Admin.')
+  }
+
+  const nextStoreId =
+    patch.storeId !== undefined || patch.role !== undefined
+      ? assertValidStoreAssignment(nextRole, patch.storeId !== undefined ? patch.storeId : account.storeId)
+      : account.storeId
+
+  if (patch.name !== undefined) account.name = String(patch.name || '').trim() || account.name
+  if (patch.username !== undefined) account.username = nextUsername
+  if (patch.email !== undefined) account.email = nextEmail
+  if (patch.phone !== undefined) account.phone = String(patch.phone || '').trim()
+  if (patch.address !== undefined) account.address = String(patch.address || '').trim()
+  account.role = nextRole
+  account.storeId = nextStoreId
+
+  const sensitive =
+    before.role !== account.role || before.storeId !== account.storeId || before.email !== account.email
+  if (sensitive) revokeAccountSessions(state, account.id, 'admin_updated')
+
+  log(state, 'info', 'Account details updated', {
+    ...actorMeta(),
+    accountId: account.id,
+    before,
+    after: {
+      name: account.name,
+      username: account.username,
+      email: account.email,
+      role: account.role,
+      storeId: account.storeId,
+      status: accountStatusOf(account),
+    },
+  })
+  persist(state)
+  syncSessionFromAccount(account)
+  return toPublicAccount(account)
+}
+
+export function superAdminResetPassword(accountId, newPassword) {
+  assertRole(['super_admin'])
+  const password = String(newPassword || '')
+  if (password.length < 6) throw new Error('Temporary password must be at least 6 characters.')
+  const state = getState()
+  const account = state.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error('Account not found')
+  account.password = password
+  account.mustChangePassword = true
+  revokeAccountSessions(state, account.id, 'password_reset')
+  log(state, 'warn', 'Password reset completed', {
+    ...actorMeta(),
+    accountId: account.id,
+  })
+  persist(state)
+  return toPublicAccount(account)
+}
+
+export function superAdminSetAccountStatus(accountId, status) {
+  assertRole(['super_admin'])
+  if (status !== 'active' && status !== 'disabled') throw new Error('Invalid account status.')
+  const state = getState()
+  const account = state.accounts.find((a) => a.id === accountId)
+  if (!account) throw new Error('Account not found')
+  const session = getCurrentSession()
+  if (session?.id === account.id && status === 'disabled') {
+    throw new Error('You cannot deactivate your own Super Admin account.')
+  }
+  if (account.role === 'super_admin' && status === 'disabled' && countActiveSuperAdmins(state, account.id) < 1) {
+    throw new Error('Cannot deactivate the last active Super Admin.')
+  }
+  account.status = status
+  if (status === 'disabled') revokeAccountSessions(state, account.id, 'deactivated')
+  log(state, 'warn', status === 'disabled' ? 'Account deactivated' : 'Account activated', {
+    ...actorMeta(),
+    accountId: account.id,
+    status,
+  })
+  persist(state)
+  return toPublicAccount(account)
+}
+
+export function superAdminDeleteAccount(accountId) {
+  assertRole(['super_admin'])
+  const state = getState()
+  const session = getCurrentSession()
+  if (session?.id === accountId) throw new Error('You cannot delete your own Super Admin account.')
+  const idx = state.accounts.findIndex((a) => a.id === accountId)
+  if (idx < 0) throw new Error('Account not found')
+  const account = state.accounts[idx]
+  if (account.role === 'super_admin' && countActiveSuperAdmins(state, account.id) < 1) {
+    throw new Error('Cannot delete the last active Super Admin.')
+  }
+  if (account.role === 'customer' && state.orders.some((o) => o.customerId === accountId)) {
+    throw new Error('This customer has order history. Deactivate the account instead of deleting it.')
+  }
+  revokeAccountSessions(state, account.id, 'deleted')
+  if (account.role === 'staff') {
+    state.orders = state.orders.map((o) =>
+      o.assignedStaffId === accountId ? { ...o, assignedStaffId: null } : o,
+    )
+  }
+  state.messages = state.messages.filter((m) => m.fromId !== accountId && m.toId !== accountId)
+  state.accounts.splice(idx, 1)
+  log(state, 'warn', 'Account deleted', { ...actorMeta(), accountId, role: account.role })
+  persist(state)
+  return true
+}
+
+export function getAccountAuditEntries(accountId, limit = 30) {
+  assertRole(['super_admin'])
+  const state = getState()
+  return (state.systemLogs || [])
+    .filter((row) => row.meta?.accountId === accountId)
+    .slice(0, limit)
+    .map((row) => ({
+      id: row.id,
+      message: row.message,
+      createdAt: row.createdAt,
+      meta: {
+        actorId: row.meta?.actorId || null,
+        role: row.meta?.role || null,
+        storeId: row.meta?.storeId || null,
+        before: row.meta?.before || null,
+        after: row.meta?.after || null,
+        status: row.meta?.status || null,
+      },
+    }))
+}
+
+export function getAccountLoginHistory(accountId, limit = 20) {
+  assertRole(['super_admin'])
+  const state = getState()
+  ensureSessions(state)
+  return (state.sessions || [])
+    .filter((s) => s.accountId === accountId)
+    .slice(0, limit)
+    .map((s) => ({
+      id: s.id,
+      startedAt: s.startedAt,
+      lastActivityAt: s.lastActivityAt,
+      endedAt: s.endedAt,
+      endReason: s.endReason,
+      role: s.role,
+      storeId: s.storeId,
+    }))
+}
+
+export function changeOwnPassword(currentPassword, nextPassword) {
+  const session = getCurrentSession()
+  if (!session?.id) throw new Error('Please sign in to change your password.')
+  const next = String(nextPassword || '')
+  if (next.length < 6) throw new Error('New password must be at least 6 characters.')
+  const state = getState()
+  const account = state.accounts.find((a) => a.id === session.id)
+  if (!account) throw new Error('Account not found')
+  if (String(account.password) !== String(currentPassword || '')) {
+    throw new Error('Current password is incorrect.')
+  }
+  account.password = next
+  account.mustChangePassword = false
+  log(state, 'info', 'Password changed by account owner', { accountId: account.id, actorId: account.id })
+  persist(state)
+  syncSessionFromAccount(account)
+  return toPublicAccount(account)
 }
 
 function syncSessionFromAccount(acc) {

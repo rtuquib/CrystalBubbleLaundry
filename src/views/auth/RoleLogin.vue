@@ -6,7 +6,7 @@
     <section class="relative z-10 w-full max-w-[430px] rounded-2xl border border-white/60 bg-white px-6 py-7 shadow-[0_24px_48px_-12px_rgba(37,99,235,0.35)] sm:px-7">
       <div class="flex justify-center mb-3">
         <div class="h-14 w-14 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-md">
-          <img src="../../assets/logo.svg" alt="CrystalBubble Logo" class="h-8 w-8" />
+          <img src="../../assets/logo.svg" :alt="config.logoAlt" class="h-8 w-8" />
         </div>
       </div>
 
@@ -98,28 +98,32 @@ const errorMessage = ref('')
 
 const ROLE_CONFIG = {
   super_admin: {
-    title: 'Super Admin',
-    subtitle: 'Sign in to the platform control portal',
+    title: 'Platform Administration',
+    subtitle: 'Sign in to the Laundry Management System',
     placeholder: 'Username or Email',
     expectedRole: 'super_admin',
+    logoAlt: 'Laundry Management System',
   },
   admin: {
     title: 'Admin',
-    subtitle: 'Sign in to your store admin portal',
+    subtitle: 'Sign in to your laundry shop admin portal',
     placeholder: 'Username or Email',
     expectedRole: 'admin',
+    logoAlt: 'Laundry shop administrator',
   },
   staff: {
     title: 'Staff',
     subtitle: 'Sign in to your store operations portal',
     placeholder: 'Username or Email',
     expectedRole: 'staff',
+    logoAlt: 'Laundry shop staff',
   },
   customer: {
     title: 'Customer',
     subtitle: 'Sign in to track orders and payments',
     placeholder: 'Username or Email',
     expectedRole: 'customer',
+    logoAlt: 'Customer portal',
   },
 }
 

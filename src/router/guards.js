@@ -53,6 +53,7 @@ export function roleAllowedForPath(role, path) {
   if (!normalized || !path) return false
 
   if (path === '/' || path === '/register' || path.startsWith('/login')) return true
+  if (path === '/account/change-password') return true
   if (path.startsWith('/super-admin')) return normalized === 'super_admin'
   if (path.startsWith('/admin')) return normalized === 'admin'
   if (path.startsWith('/staff')) return normalized === 'staff'

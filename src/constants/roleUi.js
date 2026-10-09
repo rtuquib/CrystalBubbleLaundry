@@ -2,16 +2,18 @@ export const ROLE_UI = {
   super_admin: {
     roleKey: 'super_admin',
     roleLabel: 'Super Admin',
-    panelLabel: 'Platform Control',
+    panelLabel: 'Super Admin Control Center',
+    brandTitle: 'Laundry MS',
     homePath: '/super-admin/dashboard',
     navItems: [
-      { label: 'Dashboard', to: '/super-admin/dashboard', icon: 'SA' },
-      { label: 'Stores', to: '/super-admin/stores', icon: 'ST' },
+      { label: 'Dashboard', to: '/super-admin/dashboard', icon: 'OV' },
+      { label: 'Laundry Shops', to: '/super-admin/stores', icon: 'SH' },
+      { label: 'Accounts', to: '/super-admin/accounts', icon: 'AC' },
     ],
     permissions: [
-      'Monitor all CrystalBubble stores',
-      'Onboard stores and first administrators',
-      'Suspend or reactivate store access',
+      'Monitor registered laundry shops on the platform',
+      'Onboard shops and first administrators',
+      'Manage platform accounts, roles, and access',
     ],
   },
   admin: {

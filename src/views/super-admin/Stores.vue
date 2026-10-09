@@ -1,9 +1,9 @@
 <template>
   <div class="space-y-6 lg:space-y-8">
     <section class="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-      <h2 class="text-xl font-semibold text-slate-900">Stores</h2>
+      <h2 class="text-xl font-semibold text-slate-900">Laundry shops</h2>
       <p class="mt-1 text-sm text-slate-500">
-        Onboard laundry shops onto CrystalBubble. Each store gets its own admin who manages staff and customers.
+        Onboard independent laundry businesses onto the Laundry Management System. Each shop keeps its own name, admin, staff, and customers.
       </p>
 
       <div class="mt-5 overflow-x-auto">
@@ -85,8 +85,8 @@
     </section>
 
     <section class="max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-      <h3 class="text-lg font-semibold text-slate-900">Onboard a store</h3>
-      <p class="mt-1 text-sm text-slate-500">Creates a store and its first administrator account.</p>
+      <h3 class="text-lg font-semibold text-slate-900">Onboard a laundry shop</h3>
+      <p class="mt-1 text-sm text-slate-500">Creates a registered business and its first shop administrator account.</p>
 
       <form class="mt-5 grid gap-4 sm:grid-cols-2" @submit.prevent="submit">
         <div>

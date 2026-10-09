@@ -11,6 +11,7 @@
       :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
     >
       <RoleSidebar
+        :brandTitle="ui.brandTitle || 'Laundry MS'"
         :panelLabel="ui.panelLabel"
         :navItems="ui.navItems"
         @close="isSidebarOpen = false"
@@ -21,7 +22,7 @@
       <RoleTopHeader
         :userName="loggedInUser.name"
         :roleLabel="ui.roleLabel"
-        storeName="CrystalBubble Platform"
+        storeName="Laundry Management System"
         profilePath="/super-admin/dashboard"
         :notificationCount="0"
         @toggle-sidebar="isSidebarOpen = !isSidebarOpen"
